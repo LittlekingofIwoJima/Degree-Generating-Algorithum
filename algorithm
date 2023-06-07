@@ -1,0 +1,347 @@
+import json
+import math
+import numpy as np
+import cvxpy as cp
+import csv
+import pandas as pd
+
+# used to extend all 1s
+np.set_printoptions(threshold=np.inf)
+def past_term(matrix):
+    result_number=0
+    for element in matrix:
+        flag=True
+        for i in range(0,len(element)):
+            if element[i]!="0.0":
+               # print(i)
+                if flag == True:
+                    flag = False
+                    if i>result_number:
+                        result_number=i
+    #print(result_number)
+    return result_number
+
+def number_checker(lst):
+    temp_number=''
+    for i in lst:
+        if i=='.':
+            return temp_number
+        if i.isdigit():
+            temp_number=temp_number+i
+    return temp_number
+                
+def at_least_course(lst):
+    result=""
+    add=False
+    result_list=[]
+    for element in lst:
+        if element=='[':
+            add=True
+            #result=result+element
+        elif element==']':
+           # result=result+element
+            add=False
+            result_list=result.split(',')
+            return result_list
+        else:
+            if add==True:
+                result=result+element
+                
+def number_of_course(lst):
+    check=False
+    result=""
+    for element in lst:
+        if element == ']':
+            check=True
+        if check==True:
+            if element.isdigit():
+                result=result+str(element)
+    return result
+                
+def display(lst,num):
+    total=0
+    for element in lst:
+        total+=element[num]
+    return total
+        
+                
+# student file data processing
+with open("/Users/sitongjin/Documents/new_plan/1.csv",'r') as f:
+    csvreader = list(csv.reader(f))
+    whole_matrix = np.array(csvreader[1:])
+    whole_matrix = whole_matrix.astype(np.float64)
+    row,column=whole_matrix.shape
+    probability_matrix = whole_matrix[:,1:]
+    # history courses we need
+    past_course=whole_matrix[:,1:3]
+    past_course_2= whole_matrix[:,1:3]
+    remaining_matrix=np.zeros((row,6))
+    past_course=np.append(past_course,remaining_matrix,axis=1)
+    
+total=0
+for element in past_course:
+    total+=int(element[0])
+    total+=int(element[1])
+# course data processing into dictinary
+with open("/Users/sitongjin/Documents/Cortland_Courses.csv",'r') as f:
+    csvreader = list(csv.reader(f))
+    csvreader=csvreader[1:]
+    course_dict={}
+    course_ref={}
+    for element in csvreader:
+        course_dict[element[1]]=int(element[0])-1
+        course_ref[int(element[0])-1]=element[1]
+
+        
+# read in json requirement file
+with open("/Users/sitongjin/Documents/requirement.json",'r') as f:
+    data = json.load(f)
+    least_credit=0
+    residency_credit=0
+    gpa=0
+    total_class={}
+    i=0
+    total_course=0
+    for lines in data:
+        
+        if "Credits >=" in lines and lines[0]=='C':
+            least_credit=number_checker(lines)
+            
+        if "ResidenceCredits >=" in lines:
+            residency_credit=number_checker(lines)
+            
+        if "GPA >=" in lines:
+            gpa=number_checker(lines)
+# probability_matrix 1857 by 8 probability_matrix
+# past_course matrix 1857 by 8 past-course
+# credits 1857 by 8 all 3 credits
+credits=np.full((past_course.shape[0],past_course.shape[1]), 3, dtype=int)
+
+# schedule matrix 1857 by 8 0's and 1's
+schedule=np.ones((past_course.shape[0],past_course.shape[1]),dtype=int)
+
+# add missing courses to student file and course file with 0's
+# try except to catch errors
+priority_list=[['CRM222'],['CRM373', 'SOC373'],['CRM463', 'SOC463'],['SOC150'],['SOC301', 'SOC493', 'SOC293'],['SOC302', 'SOC494', 'SOC294'],
+              ['SOC300'],['SOC230', 'SOC235', 'SOC315', 'SOC322', 'SOC335', 'SOC340', 'SOC350', 'SOC351', 'SOC352', 'SOC355', 'SOC360', 'SOC366', 'SOC370', 'SOC371', 'SOC385', 'SOC401', 'SOC430', 'SOC451', 'SOC465', 'SOC470', 'SOC475', 'SOC480', 'SOC505'],
+              ['CRM202', 'CRM303', 'CRM375', 'POL202', 'SOC375'],['CRM333', 'CRM363', 'CRM392', 'CRM464', 'CRM477', 'CRM485', 'PHI205'],['CRM380', 'CRM383'],['CRM325', 'CRM333', 'CRM345', 'CRM348', 'CRM363', 'CRM365', 'CRM372', 'CRM373', 'CRM377', 'CRM378', 'CRM380', 'CRM383', 'CRM392', 'CRM395', 'CRM399', 'CRM403', 'CRM404', 'CRM412', 'CRM462', 'CRM463', 'CRM464', 'CRM477', 'CRM485']]
+#print(course_dict)
+required_list=[]
+for element in priority_list:
+    temp=[]
+    for element_2 in element:
+        temp.append(course_dict[element_2])
+    required_list.append(temp)
+print(required_list)
+
+# this is the output matrix
+result=cp.Variable((past_course.shape[0],past_course.shape[1]),boolean=True)
+
+# semester credits limit
+semester_credit_matrix=cp.multiply(credits,result)
+
+# total credits suggested
+total_credits=cp.sum(cp.multiply(result,credits))
+
+# non repeat constraint
+non_repeat=np.ones(result.shape[0])
+
+#loss constraint
+total_prob=cp.sum(cp.multiply(result,probability_matrix))
+total_courses=cp.sum(result)
+loss=total_courses-total_prob
+# requirements
+for i in range(0,len(required_list)):
+    if i == 0 :
+        requirement_1=0
+        for b in required_list[i]:
+            requirement_1+=cp.sum(result[b-1])
+    if i == 1 :
+        requirement_2=0
+        for b in required_list[i]:
+            requirement_2+=cp.sum(result[b-1])
+    if i == 2 :
+        requirement_3=0
+        for b in required_list[i]:
+            requirement_3+=cp.sum(result[b-1])
+    if i == 3 :
+        requirement_4=0
+        for b in required_list[i]:
+            requirement_4+=cp.sum(result[b-1])
+            
+    if i == 4 :
+        requirement_5=0
+        for b in required_list[i]:
+            requirement_5+=cp.sum(result[b-1])
+            
+    if i == 5 :
+        requirement_6=0
+        for b in required_list[i]:
+            requirement_6+=cp.sum(result[b-1])
+    
+    if i == 6 :
+        requirement_7=0
+        for b in required_list[i]:
+            requirement_7+=cp.sum(result[b-1])
+    if i == 7 :
+        requirement_8=0
+        for b in required_list[i]:
+            requirement_8+=cp.sum(result[b-1])
+    if i == 8 :
+        requirement_9=0
+        for b in required_list[i]:
+            requirement_9+=cp.sum(result[b-1])
+    if i == 9 :
+        requirement_10=0
+        for b in required_list[i]:
+            requirement_10+=cp.sum(result[b-1])
+            
+    if i == 10 :
+        requirement_11=0
+        for b in required_list[i]:
+            requirement_11+=cp.sum(result[b-1])
+            
+    if i == 11 :
+        requirement_12=0
+        for b in required_list[i]:
+            requirement_12+=cp.sum(result[b-1])
+
+#first_history=past_course[:,0]
+#second_history=past_course[:,1]
+first_history=int(display(past_course,0))
+second_history=int(display(past_course,1))
+ones_matrix=np.ones(past_course.shape[0])
+#print(first_history)
+#print(second_history)
+
+# more parameter requirements ( finish the degree in X semesters)
+# minimize the cost (maybe?)
+prob=cp.Problem(cp.Minimize(loss),
+                [
+                    # total credits requirement
+                    total_credits>=least_credit,total_credits<=120,
+                    # course offering requirement
+                    cp.multiply(schedule,result)==result,
+                    
+                    
+                    # number of courses and credits limit
+                    # needs improvements 
+                    requirement_1>=1,requirement_2>=1,requirement_3>=1,
+                    requirement_4>=1,requirement_5>=1,requirement_6>=1,
+                    requirement_7>=1,requirement_8>=1,requirement_9>=1,
+                    requirement_10>=2,requirement_11>=1,requirement_12>=2,
+                    
+                    # semester credits constraints
+                    cp.multiply(result[:,[0,1]],past_course_2)==past_course_2,
+                   
+                    cp.sum(semester_credit_matrix[:,2])>=12,cp.sum(semester_credit_matrix[:,2])<=18,
+                    cp.sum(semester_credit_matrix[:,3])>=12,cp.sum(semester_credit_matrix[:,3])<=18,
+                    cp.sum(semester_credit_matrix[:,4])>=12,cp.sum(semester_credit_matrix[:,4])<=18,
+                    cp.sum(semester_credit_matrix[:,5])>=12,cp.sum(semester_credit_matrix[:,5])<=18,
+                    cp.sum(semester_credit_matrix[:,6])>=12,cp.sum(semester_credit_matrix[:,6])<=18,
+                    cp.sum(semester_credit_matrix[:,7])>=12,cp.sum(semester_credit_matrix[:,7])<=18,
+                    
+                    # non-repeat constraint 
+                   # (sum(result)<=past_course_2).all(),
+                    #(cp.sum(result,axis=1)<=ones_matrix),
+                    
+                    # remaining course constraint
+                    cp.sum(result-past_course)>=12,
+                    
+                    # remaining credit constraint 
+                    cp.sum(cp.multiply(credits,result-past_course))>=30,
+                    
+                ]
+               )
+prob.solve()
+b=result.value
+print(b)
+#print((b[:,[0,1]]==past_course_2).all())
+#print(b[:,[0,1]])
+#print(past_course_2)
+#print(sum(sum(b[:,[0,1]])))
+#print(sum(sum((past_course_2))))
+total=0
+DF = pd.DataFrame(b)
+DF.columns=['term_1','term_2','term_3','term_4','term_5','term_6','term_7','term_8']
+DF.index = np.arange(1, len(DF) + 1)
+#print(sum(b[:,1]))
+# save the dataframe as a csv file
+#DF.to_csv("/Users/sitongjin/Documents/new_generated_plan/new_9.csv")
+
+
+fall_1=[]
+spring_1=[]
+fall_2=[]
+spring_2=[]
+fall_3=[]
+spring_3=[]
+fall_4=[]
+sprint_4=[]
+
+
+# next goals may 26th
+# 1: developing and sharing code into a github (cal repo github)
+#   
+# 2: extend (incorporate) last sets of requirements (general degree requirements)
+
+# semester 0 (AP, High school portion) 3 history courses in total.
+# not everystudent has semester 0. 
+# semesters passed in as parameters (including past history semesters)
+# the semester creidts should also be dynamic parameters that are passed in. (user defined)
+
+
+
+
+               
+#def at_least_credits(lst,dictionary):
+        
+
+# read in json requirement file
+# we have past course history past_course
+# we have probability matrix probability
+# we have course_dict for course reference
+
+   
+
+   
+        
+# add all missing courses in csv files (check for dictionary)
+# add missing courses in both csv files and numpy matrices 
+# add to both student files and course files
+# probabilities all 0s
+# history courses only appear in the first 2 columns
+# 3-4 columns are used to take only courses that are able to transferred
+# 5-8 are future columns 
+# human readable outputs 
+
+
+
+
+
+# google calendar invitations 
+# what the program is (major name)
+# any additional information about the email
+# all day invite
+# 
+
+
+# goals for this week:
+# output the result in the same format with 0's and 1's
+# dynamically load in files 
+# at least k credits and k courses constraints 
+# process the requirement variables 
+
+# maybe grades
+
+
+# try debugging 9th file
+
+
+
+# approach 1 
+# add rows to be 0's for rest of the data (fault tolerance)
+# fix the rows to be 0's
+# approach 2
+# pre-process the data 
+# send back the result ASAP
